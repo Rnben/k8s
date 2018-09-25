@@ -155,3 +155,5 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 https://www.kubernetes.org.cn/4256.html
 https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
 https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/#join-nodes
+https://github.com/kubernetes/dashboard
+https://jimmysong.io/kubernetes-handbook/practice/dashboard-addon-installation.html

@@ -1,160 +1,84 @@
-# k8s
+# flannel
 
-# 安装手册
->https://github.com/Rnben/k8s
+![flannel Logo](logos/flannel-horizontal-color.png)
 
-## 集群环境
+[![Build Status](https://travis-ci.org/coreos/flannel.png?branch=master)](https://travis-ci.org/coreos/flannel)
 
-|主机名|IP|安装软件|
-|---|---|---|
-|node1|11.11.11.111|kubeadm、kubelet、kubectl|
-|node2|11.11.11.112|kubeadm、kubelet|
+Flannel is a simple and easy way to configure a layer 3 network fabric designed for Kubernetes.
 
-使用vagrant创建虚拟机
+## How it works
 
-```
-# -*- mode: ruby -*-
-# vi: set ft=ruby :
+Flannel runs a small, single binary agent called `flanneld` on each host, and is responsible for allocating a subnet lease to each host out of a larger, preconfigured address space.
+Flannel uses either the Kubernetes API or [etcd][etcd] directly to store the network configuration, the allocated subnets, and any auxiliary data (such as the host's public IP).
+Packets are forwarded using one of several [backend mechanisms][backends] including VXLAN and various cloud integrations.
 
-ENV["LC_ALL"] = "en_US.UTF8"
+### Networking details
 
-Vagrant.configure("2") do |config|
-  (1..2).each do |i|
-    config.vm.define "node#{i}" do |node|
-      node.vm.box = "bento/centos-7.4"
-      node.vm.hostname = "node#{i}"
-      node.ssh.username = "root"
-      node.ssh.password = "vagrant"
-      node.ssh.insert_key = true
-      node.vm.box_check_update = false
-      node.vm.network "private_network", ip: "11.11.11.11#{i}"
-      node.vm.provider "virtualbox" do |vb|
-              vb.customize ["modifyvm", :id, "--name", "node#{i}", "--memory", "2048"]
-      end
-      node.vm.provision "shell", inline: <<-SHELL
-        echo "Hello,enjoy!!"
-      SHELL
-      end
-  end
-end
-```
-## 主机初始化
+Platforms like Kubernetes assume that each container (pod) has a unique, routable IP inside the cluster.
+The advantage of this model is that it removes the port mapping complexities that come from sharing a single host IP.
 
->所有主机操作
+Flannel is responsible for providing a layer 3 IPv4 network between multiple nodes in a cluster. Flannel does not control how containers are networked to the host, only how the traffic is transported between hosts. However, flannel does provide a CNI plugin for Kubernetes and a guidance on integrating with Docker.
 
-```
-# 关闭swap
-swapoff -a && sed -i 's/.*swap.*/#&/' /etc/fstab
+Flannel is focused on networking. For network policy, other projects such as [Calico][calico] can be used.
 
-# 禁用selinux
-sed -i 's/SELINUX=permissive/SELINUX=disabled/' /etc/sysconfig/selinux && setenforce 0
+## Getting started on Kubernetes
 
-# 开启forward
-iptables -P FORWARD ACCEPT
+The easiest way to deploy flannel with Kubernetes is to use one of several deployment tools and distributions that network clusters with flannel by default. For example, CoreOS's [Tectonic][tectonic] sets up flannel in the Kubernetes clusters it creates using the open source [Tectonic Installer][tectonic-installer] to drive the setup process.
 
-# 配置转发相关参数
-cat <<EOF > /etc/sysctl.d/k8s.conf
-net.bridge.bridge-nf-call-ip6tables = 1
-net.bridge.bridge-nf-call-iptables = 1
-vm.swappiness=0
-EOF
-sysctl --system
+Though not required, it's recommended that flannel uses the Kubernetes API as its backing store which avoids the need to deploy a discrete `etcd` cluster for `flannel`. This `flannel` mode is known as the *kube subnet manager*.
 
-# hosts配置
-cat <<EOF > /etc/hosts
-11.11.11.111 node1
-11.11.11.112 node2
-EOF
-```
+### Deploying flannel manually
 
-## 安装docker
+Flannel can be added to any existing Kubernetes cluster though it's simplest to add `flannel` before any pods using the pod network have been started.
 
-```
-yum-config-manager --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
-yum makecache fast
-yum -y install vim docker-ce
-systemctl start docker && systemctl enable docker
-```
+For Kubernetes v1.7+
+`kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml`
 
-## 安装Kubeadm 
-使用阿里镜像源安装
-```
-cat <<EOF > /etc/yum.repos.d/kubernetes.repo
-[kubernetes]
-name=Kubernetes
-baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64
-enabled=1
-gpgcheck=1
-repo_gpgcheck=1
-gpgkey=https://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
-EOF
+See [Kubernetes](Documentation/kubernetes.md) for more details.
 
-yum install -y kubectl-1.11.2 kubelet-1.11.2 kubeadm-1.11.2
+## Getting started on Docker
 
-cat <<EOF >/etc/sysconfig/kubelet
-KUBELET_EXTRA_ARGS="--cgroup-driver=$DOCKER_CGROUPS --pod-infra-container-image=registry.cn-hangzhou.aliyuncs.com/google_containers/pause-amd64:3.1"
-EOF
-```
+flannel is also widely used outside of kubernetes. When deployed outside of kubernetes, etcd is always used as the datastore. For more details integrating flannel with Docker see [Running](Documentation/running.md)
 
-> 官方镜像导出 `kubeadm config images list --kubernetes-version=v1.11.2`
+## Documentation
+- [Building (and releasing)](Documentation/building.md)
+- [Configuration](Documentation/configuration.md)
+- [Backends](Documentation/backends.md)
+- [Running](Documentation/running.md)
+- [Troubleshooting](Documentation/troubleshooting.md)
+- [Projects integrating with flannel](Documentation/integrations.md)
+- [Production users](Documentation/production-users.md)
 
-## 配置master节点
+## Contact
 
-*kubeadm-master.config*
-```
-apiVersion: kubeadm.k8s.io/v1alpha2
-kind: MasterConfiguration
-kubernetesVersion: v1.11.2
-api:
-  advertiseAddress: 11.11.11.111
-# controlPlaneEndpoint: 11.11.11.110:8443
-imageRepository: registry.cn-hangzhou.aliyuncs.com/google_containers
-networking:
-  podSubnet: 10.244.0.0/16
-kubeProxy:
-  config:
-    mode: iptables
-```
+* Mailing list: coreos-dev
+* IRC: #coreos on freenode.org
+* Slack: #flannel on [Calico Users Slack](https://slack.projectcalico.org)
+* Planning/Roadmap: [milestones][milestones], [roadmap][roadmap]
+* Bugs: [issues][flannel-issues]
 
-*拉取镜像* 
-`kubeadm config images pull --config kubeadm-master.config`
+## Contributing
 
-*初始化*
-`kubeadm init --config kubeadm-master.config`
-*保存最后输出的 join 命令*
-`kubeadm join --token <token> <master-ip>:<master-port> --discovery-token-ca-cert-hash sha256:<hash>`
+See [CONTRIBUTING][contributing] for details on submitting patches and the contribution workflow.
 
->查看或新建token
->`kubeadm token list`
->`kubeadm token create`
->
->*-discovery-token-ca-cert-hash*
->openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin >-outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //'
+## Reporting bugs
 
-*配置kubectl*
-```
-mkdir -p $HOME/.kube
-sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-sudo chown $(id -u):$(id -g) $HOME/.kube/config
-```
+See [reporting bugs][reporting] for details about reporting any issues.
 
-查看节点状态
-`kubectl get nodes`
+## License
 
-移除master节点的污点
-`kubectl taint nodes --all node-role.kubernetes.io/master-`
+Flannel is under the Apache 2.0 license. See the [LICENSE][license] file for details.
 
-## 配置网络插件
-`kubectl create -f kube-flannel.yaml`
-
-## 添加node节点
-`kubeadm join ... `
-
-
-
-## 参考链接
-https://www.kubernetes.org.cn/4256.html
-https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
-https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/#join-nodes
-https://github.com/kubernetes/dashboard
-https://jimmysong.io/kubernetes-handbook/practice/dashboard-addon-installation.html
+[calico]: http://www.projectcalico.org
+[pod-cidr]: https://kubernetes.io/docs/admin/kubelet/
+[etcd]: https://github.com/coreos/etcd
+[contributing]: CONTRIBUTING.md
+[license]: https://github.com/coreos/flannel/blob/master/LICENSE
+[milestones]: https://github.com/coreos/flannel/milestones
+[flannel-issues]: https://github.com/coreos/flannel/issues
+[backends]: Documentation/backends.md
+[roadmap]: https://github.com/kubernetes/kubernetes/milestones
+[reporting]: Documentation/reporting_bugs.md
+[tectonic-installer]: https://github.com/coreos/tectonic-installer
+[installing-with-kubeadm]: https://kubernetes.io/docs/getting-started-guides/kubeadm/
+[tectonic]: https://coreos.com/tectonic/
